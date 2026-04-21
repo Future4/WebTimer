@@ -1,0 +1,32 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "npm",
+      "script": "dev",
+      "group": "build",
+      "presentation": {
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "isBackground": true,
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
+      "type": "npm",
+      "script": "build",
+      "group": "build",
+      "presentation": {
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    }
+  ]
+}

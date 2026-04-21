@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "~/*": [
+        "./*"
+      ]
+    },
+    "strict": true,
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowJs": true,
+    "noEmit": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ES2020"
+    ],
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    ".plasmo/index.d.ts",
+    "popup.tsx",
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

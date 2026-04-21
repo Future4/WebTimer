@@ -1,0 +1,1 @@
+Placeholder for icon.png. Replace this file with a 128x128 PNG icon for the extension.

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebTimer 测试页面</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        button {
+            background: #165DFF;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #144FE0;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebTimer 功能测试</h1>
+
+    <div class="test-section">
+        <h2>1. 存储数据测试</h2>
+        <p>模拟 background.ts 保存的数据结构</p>
+        <button onclick="saveTestData()">保存测试数据</button>
+        <button onclick="loadTestData()">加载测试数据</button>
+        <div id="storage-result" class="result">等待操作...</div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. 时间格式化测试</h2>
+        <p>测试时间格式化函数</p>
+        <button onclick="testTimeFormat()">测试格式化</button>
+        <div id="format-result" class="result">等待操作...</div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. 域名提取测试</h2>
+        <p>测试从URL提取域名的功能</p>
+        <input type="text" id="url-input" placeholder="输入URL" style="width: 300px; padding: 5px;">
+        <button onclick="testDomainExtract()">提取域名</button>
+        <div id="domain-result" class="result">等待操作...</div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. 模拟扩展行为</h2>
+        <p>模拟用户在不同网站间切换的行为</p>
+        <button onclick="simulateBrowsing()">开始模拟浏览</button>
+        <button onclick="stopSimulation()">停止模拟</button>
+        <div id="simulation-result" class="result">等待操作...</div>
+    </div>
+
+    <script>
+        // 模拟 chrome.storage API
+        const mockStorage = {
+            data: {},
+            set: function(items) {
+                Object.assign(this.data, items);
+                console.log('存储数据:', items);
+            },
+            get: function(keys, callback) {
+                const result = {};
+                if (Array.isArray(keys)) {
+                    keys.forEach(key => {
+                        result[key] = this.data[key];
+                    });
+                } else if (typeof keys === 'string') {
+                    result[keys] = this.data[keys];
+                } else {
+                    Object.assign(result, this.data);
+                }
+                callback(result);
+            }
+        };
+
+        // 替换 chrome.storage 为模拟版本
+        window.chrome = window.chrome || {};
+        window.chrome.storage = window.chrome.storage || {};
+        window.chrome.storage.local = mockStorage;
+
+        // 时间格式化函数
+        function formatTime(seconds) {
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            if (h > 0) return `${h}h ${m}m`;
+            return `${m}m`;
+        }
+
+        // 域名提取函数
+        function extractDomain(url) {
+            try {
+                const urlObj = new URL(url);
+                return urlObj.hostname;
+            } catch {
+                return "unknown";
+            }
+        }
+
+        // 测试函数
+        function saveTestData() {
+            const testData = {
+                webtimeData: {
+                    "google.com": {
+                        totalTime: 3600, // 1小时
+                        lastActive: Date.now(),
+                        focusTime: 2400
+                    },
+                    "youtube.com": {
+                        totalTime: 1800, // 30分钟
+                        lastActive: Date.now() - 10000,
+                        focusTime: 600
+                    },
+                    "github.com": {
+                        totalTime: 900, // 15分钟
+                        lastActive: Date.now() - 20000,
+                        focusTime: 900
+                    }
+                }
+            };
+
+            mockStorage.set(testData);
+            document.getElementById('storage-result').textContent =
+                '测试数据已保存:\n' + JSON.stringify(testData, null, 2);
+        }
+
+        function loadTestData() {
+            mockStorage.get('webtimeData', (result) => {
+                document.getElementById('storage-result').textContent =
+                    '加载的数据:\n' + JSON.stringify(result, null, 2);
+            });
+        }
+
+        function testTimeFormat() {
+            const testCases = [300, 1800, 3600, 7200];
+            let result = '时间格式化测试结果:\n';
+            testCases.forEach(seconds => {
+                result += `${seconds}秒 = ${formatTime(seconds)}\n`;
+            });
+            document.getElementById('format-result').textContent = result;
+        }
+
+        function testDomainExtract() {
+            const url = document.getElementById('url-input').value;
+            if (!url) {
+                document.getElementById('domain-result').textContent = '请输入URL';
+                return;
+            }
+            const domain = extractDomain(url);
+            document.getElementById('domain-result').textContent =
+                `URL: ${url}\n域名: ${domain}`;
+        }
+
+        let simulationInterval;
+        function simulateBrowsing() {
+            const sites = ['google.com', 'youtube.com', 'github.com', 'stackoverflow.com'];
+            let currentIndex = 0;
+
+            simulationInterval = setInterval(() => {
+                const site = sites[currentIndex % sites.length];
+                const mockTab = {
+                    tabId: 1,
+                    domain: site,
+                    activatedTime: Date.now()
+                };
+
+                // 模拟数据更新
+                mockStorage.get('webtimeData', (result) => {
+                    const timeData = result.webtimeData || {};
+                    if (!timeData[site]) {
+                        timeData[site] = {
+                            totalTime: 0,
+                            lastActive: Date.now(),
+                            focusTime: 0
+                        };
+                    }
+                    timeData[site].totalTime += 60; // 每次增加1分钟
+                    timeData[site].lastActive = Date.now();
+
+                    mockStorage.set({ webtimeData: timeData });
+
+                    document.getElementById('simulation-result').textContent =
+                        `正在浏览: ${site}\n当前数据:\n${JSON.stringify(timeData, null, 2)}`;
+                });
+
+                currentIndex++;
+            }, 2000); // 每2秒切换一次
+        }
+
+        function stopSimulation() {
+            if (simulationInterval) {
+                clearInterval(simulationInterval);
+                document.getElementById('simulation-result').textContent += '\n\n模拟已停止';
+            }
+        }
+
+        // 页面加载时显示初始状态
+        window.onload = function() {
+            document.getElementById('storage-result').textContent = '页面已加载，准备测试...';
+        };
+    </script>
+</body>
+</html>

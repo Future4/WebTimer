@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary: #165DFF;
+  --success: #1EC18C;
+  --warning: #FF8A3D;
+}
+
+body {
+  margin: 0;
+  background-color: #f8fafc; /* 背景稍灰，突出弹窗 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+/* 隐藏滚动条但保持可滚动 */
+main::-webkit-scrollbar {
+  width: 0px;
+}
+
+/* 饼图/圆环图渐变 */
+.chart-conic {
+  background: conic-gradient(
+    var(--primary) 0% 45%,
+    var(--success) 45% 75%,
+    var(--warning) 75% 100%
+  );
+}
+
+/* 输入框和卡片的平滑阴影 */
+.shadow-sm {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.popup-container {
+  box-shadow: 0 40px 100px rgba(22, 93, 255, 0.15);
+}
+
+/* 文字渲染优化 */
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+
