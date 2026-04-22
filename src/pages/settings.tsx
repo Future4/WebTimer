@@ -7,6 +7,16 @@ type SettingsState = {
   version: string
 }
 
+type Category = {
+  id: string
+  name: string
+  color: string
+}
+
+type DomainCategoryMap = {
+  [domain: string]: string
+}
+
 const DEFAULT_STATE: SettingsState = {
   isPro: false,
   notificationsEnabled: true,
@@ -14,19 +24,44 @@ const DEFAULT_STATE: SettingsState = {
   version: "2.1.3"
 }
 
+const DEFAULT_CATEGORIES: Category[] = [
+  { id: "work", name: "Work", color: "#165DFF" },
+  { id: "entertainment", name: "Entertainment", color: "#1EC18C" },
+  { id: "social", name: "Social", color: "#FF8A3D" },
+  { id: "other", name: "Other", color: "#94A3B8" }
+]
+
 export default function Settings() {
   const [state, setState] = useState<SettingsState>(DEFAULT_STATE)
   const [statusMessage, setStatusMessage] = useState("")
+  const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES)
+  const [domainCategories, setDomainCategories] = useState<DomainCategoryMap>({})
+  const [timeData, setTimeData] = useState<{ [domain: string]: { totalTime: number } }>({})
+  const [newCategoryName, setNewCategoryName] = useState("")
+  const [newCategoryColor, setNewCategoryColor] = useState("#165DFF")
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null)
 
   // 从 Chrome 存储加载数据
   useEffect(() => {
     const storage = chrome?.storage?.local
+    console.log("111111", chrome, chrome.storage)
     if (!storage) return
-    storage.get(["settingsState"], (result) => {
+    storage.get(["settingsState", "categories", "domainCategories", "webtimeData"], (result) => {
+      console.log("Loaded data:", result)
       if (result.settingsState) {
         setState(result.settingsState as SettingsState)
       } else {
         storage.set({ settingsState: DEFAULT_STATE })
+      }
+      if (result.categories) {
+        setCategories(result.categories)
+      }
+      if (result.domainCategories) {
+        setDomainCategories(result.domainCategories)
+      }
+      if (result.webtimeData) {
+        setTimeData(result.webtimeData)
+        console.log("Loaded webtimeData:", result.webtimeData)
       }
     })
   }, [])
@@ -35,6 +70,16 @@ export default function Settings() {
   useEffect(() => {
     chrome?.storage?.local?.set({ settingsState: state })
   }, [state])
+
+  // 分类变更保存
+  useEffect(() => {
+    chrome?.storage?.local?.set({ categories })
+  }, [categories])
+
+  // 域名分类映射变更保存
+  useEffect(() => {
+    chrome?.storage?.local?.set({ domainCategories })
+  }, [domainCategories])
 
   const togglePro = () => {
     setState(prev => ({ ...prev, isPro: !prev.isPro }))
@@ -49,6 +94,86 @@ export default function Settings() {
         setTimeout(() => setStatusMessage(""), 2000)
       })
     }
+  }
+
+  // 添加分类
+  const addCategory = () => {
+    if (!newCategoryName.trim()) return
+    
+    const newCategory: Category = {
+      id: `category_${Date.now()}`,
+      name: newCategoryName.trim(),
+      color: newCategoryColor
+    }
+    
+    setCategories(prev => [...prev, newCategory])
+    setNewCategoryName("")
+    setStatusMessage(`Category "${newCategory.name}" added.`)
+    setTimeout(() => setStatusMessage(""), 2000)
+  }
+
+  // 编辑分类
+  const startEditCategory = (category: Category) => {
+    setEditingCategory(category)
+    setNewCategoryName(category.name)
+    setNewCategoryColor(category.color)
+  }
+
+  const saveEditCategory = () => {
+    if (!editingCategory || !newCategoryName.trim()) return
+    
+    setCategories(prev => prev.map(cat => 
+      cat.id === editingCategory.id 
+        ? { ...cat, name: newCategoryName.trim(), color: newCategoryColor }
+        : cat
+    ))
+    
+    setEditingCategory(null)
+    setNewCategoryName("")
+    setStatusMessage(`Category "${newCategoryName}" updated.`)
+    setTimeout(() => setStatusMessage(""), 2000)
+  }
+
+  const cancelEditCategory = () => {
+    setEditingCategory(null)
+    setNewCategoryName("")
+  }
+
+  // 删除分类
+  const deleteCategory = (categoryId: string) => {
+    if (categoryId === "other") {
+      setStatusMessage("Cannot delete 'Other' category.")
+      setTimeout(() => setStatusMessage(""), 2000)
+      return
+    }
+    
+    if (confirm("Are you sure you want to delete this category? Websites in this category will be moved to 'Other'.")) {
+      // 将该分类下的网站移至"other"分类
+      setDomainCategories(prev => {
+        const newDomainCategories = { ...prev }
+        Object.keys(newDomainCategories).forEach(domain => {
+          if (newDomainCategories[domain] === categoryId) {
+            newDomainCategories[domain] = "other"
+          }
+        })
+        return newDomainCategories
+      })
+      
+      // 删除分类
+      setCategories(prev => prev.filter(cat => cat.id !== categoryId))
+      setStatusMessage("Category deleted.")
+      setTimeout(() => setStatusMessage(""), 2000)
+    }
+  }
+
+  // 分配域名到分类
+  const assignDomainToCategory = (domain: string, categoryId: string) => {
+    setDomainCategories(prev => ({
+      ...prev,
+      [domain]: categoryId
+    }))
+    setStatusMessage(`Domain "${domain}" assigned to category.`)
+    setTimeout(() => setStatusMessage(""), 2000)
   }
 
   return (
@@ -80,6 +205,112 @@ export default function Settings() {
           >
             {state.isPro ? "PRO ACTIVE" : "UPGRADE TO PRO"}
           </button>
+        </section>
+
+        {/* Category Management Card */}
+        <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+          <h2 className="text-lg font-bold mb-4">Category Management</h2>
+          
+          {/* Add/Edit Category Form */}
+          <div className="mb-6 p-4 bg-slate-50 rounded-xl">
+            <h3 className="text-sm font-bold mb-3">{editingCategory ? 'Edit Category' : 'Add New Category'}</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <input
+                type="text"
+                placeholder="Category Name"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                className="px-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#165DFF]"
+              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={newCategoryColor}
+                  onChange={(e) => setNewCategoryColor(e.target.value)}
+                  className="w-10 h-10 border border-slate-200 rounded-lg cursor-pointer"
+                />
+                {editingCategory ? (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={saveEditCategory}
+                      className="px-4 py-2 bg-[#165DFF] text-white rounded-lg text-sm font-bold hover:bg-[#144fe0]"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={cancelEditCategory}
+                      className="px-4 py-2 border border-slate-300 rounded-lg text-sm font-bold hover:bg-slate-100"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={addCategory}
+                    className="px-4 py-2 bg-[#165DFF] text-white rounded-lg text-sm font-bold hover:bg-[#144fe0]"
+                  >
+                    Add
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {/* Categories List */}
+          <div className="mb-6">
+            <h3 className="text-sm font-bold mb-3">Existing Categories</h3>
+            <div className="space-y-3">
+              {categories.map((category) => (
+                <div key={category.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <div className="w-6 h-6 rounded-full" style={{ backgroundColor: category.color }} />
+                    <span className="text-sm font-medium">{category.name}</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => startEditCategory(category)}
+                      className="px-3 py-1 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => deleteCategory(category.id)}
+                      className="px-3 py-1 border border-red-300 text-red-600 rounded-lg text-xs font-bold hover:bg-red-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          
+          {/* Domain Category Assignment */}
+          <div>
+            <h3 className="text-sm font-bold mb-3">Domain Category Assignment</h3>
+            {Object.keys(timeData).length > 0 ? (
+              <div className="space-y-3 max-h-80 overflow-y-auto">
+                {Object.keys(timeData).map((domain) => (
+                  <div key={domain} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg">
+                    <span className="text-sm font-medium">{domain}</span>
+                    <select
+                      value={domainCategories[domain] || "other"}
+                      onChange={(e) => assignDomainToCategory(domain, e.target.value)}
+                      className="px-3 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#165DFF]"
+                    >
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">No websites tracked yet.</p>
+            )}
+          </div>
         </section>
 
         {/* Data Management Card */}

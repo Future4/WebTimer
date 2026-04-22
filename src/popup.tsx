@@ -19,11 +19,19 @@ type TopSiteItem = {
   iconUrl: string
 }
 
+type Category = {
+  id: string
+  name: string
+  color: string
+}
+
 type PopupData = {
   totalTime: string
   distribution: DistributionItem[]
   topSites: TopSiteItem[]
   focusEnabled: boolean
+  categories: Category[]
+  domainCategories: { [domain: string]: string }
 }
 
 const defaultData: PopupData = {
@@ -38,7 +46,18 @@ const defaultData: PopupData = {
     { domain: "youtube.com", time: "45m", percent: 45, iconUrl: "https://www.youtube.com/favicon.ico" },
     { domain: "facebook.com", time: "32m", percent: 30, iconUrl: "https://www.facebook.com/favicon.ico" }
   ],
-  focusEnabled: true
+  focusEnabled: true,
+  categories: [
+    { id: "work", name: "Work", color: "#165DFF" },
+    { id: "entertainment", name: "Entertainment", color: "#1EC18C" },
+    { id: "social", name: "Social", color: "#FF8A3D" },
+    { id: "other", name: "Other", color: "#94A3B8" }
+  ],
+  domainCategories: {
+    "google.com": "work",
+    "youtube.com": "entertainment",
+    "facebook.com": "social"
+  }
 }
 import Dashboard from "./pages/dashboard"
 // import PopupCopy from "./popup_copy"
@@ -75,25 +94,27 @@ export default function Popup() {
     const fetchTimeData = async () => {
       try {
         // 从 background 获取数据
-        const timeData = await new Promise((resolve) => {
+        const response = await new Promise((resolve) => {
           try {
             if (!chrome?.runtime?.sendMessage) {
               console.warn("chrome.runtime.sendMessage is not available")
-              resolve({})
+              resolve({ timeData: {}, categories: [], domainCategories: {} })
               return
             }
 
             chrome.runtime.sendMessage(
               { action: "getTimeData" },
               (response) => {
-                resolve(response || {})
+                resolve(response || { timeData: {}, categories: [], domainCategories: {} })
               }
             )
           } catch (error) {
             console.error("Error sending message:", error)
-            resolve({})
+            resolve({ timeData: {}, categories: [], domainCategories: {} })
           }
-        }) as Record<string, { totalTime: number }>
+        }) as { timeData: Record<string, { totalTime: number }>, categories: Category[], domainCategories: { [domain: string]: string } }
+       
+        const { timeData, categories, domainCategories } = response
 
         // 格式化数据
         const sites: TopSiteItem[] = Object.entries(timeData)
@@ -109,14 +130,42 @@ export default function Popup() {
         // 计算总时长
         const totalSeconds = Object.values(timeData).reduce((sum, data) => sum + data?.totalTime, 0)
 
-      setData({
-        totalTime: formatTime(totalSeconds),
-        distribution: [
-          { label: "Tracked", duration: formatTime(totalSeconds), percent: 100, color: "#165DFF" }
-        ],
-        topSites: sites,
-        focusEnabled: false
-      })
+        // 计算各分类的时间
+        const categoryTime: { [categoryId: string]: number } = {}
+
+        // 初始化各分类时间为0
+        categories.forEach(category => {
+          categoryTime[category.id] = 0
+        })
+
+        // 遍历所有域名，按分类累加时间
+        Object.entries(timeData).forEach(([domain, data]) => {
+          const categoryId = domainCategories[domain] || "other"
+          categoryTime[categoryId] += data?.totalTime || 0
+        })
+
+        // 生成分布数据
+        const distribution: DistributionItem[] = categories
+          .map(category => {
+            const time = categoryTime[category.id] || 0
+            const percent = totalSeconds > 0 ? Math.round((time / totalSeconds) * 100) : 0
+            return {
+              label: category.name,
+              duration: formatTime(time),
+              percent,
+              color: category.color
+            }
+          })
+          .filter(item => item.percent > 0) // 只显示有时间的分类
+
+        setData({
+          totalTime: formatTime(totalSeconds),
+          distribution,
+          topSites: sites,
+          focusEnabled: false,
+          categories,
+          domainCategories
+        })
       } catch (error) {
         console.error("Error fetching time data:", error)
         // 设置默认数据，防止 UI 崩溃
@@ -126,14 +175,21 @@ export default function Popup() {
             { label: "Tracked", duration: "0m", percent: 100, color: "#165DFF" }
           ],
           topSites: [],
-          focusEnabled: false
+          focusEnabled: false,
+          categories: [
+            { id: "work", name: "Work", color: "#165DFF" },
+            { id: "entertainment", name: "Entertainment", color: "#1EC18C" },
+            { id: "social", name: "Social", color: "#FF8A3D" },
+            { id: "other", name: "Other", color: "#94A3B8" }
+          ],
+          domainCategories: {}
         })
       }
     }
 
     fetchTimeData()
 
-    // 每5秒刷新一次数据
+    // 每3秒刷新一次数据
     const interval = setInterval(fetchTimeData, 3000)
     return () => clearInterval(interval)
   }, [])
@@ -143,7 +199,7 @@ export default function Popup() {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
     const s = Math.floor(seconds % 60);
-    
+
     if (h > 0) {
       return `${h}h ${m}m ${s}s`;
     } else if (m > 0) {
@@ -170,12 +226,14 @@ export default function Popup() {
   }
 
   const handleSettingsClick = () => {
-    chrome.windows.create({
-      url: chrome.runtime.getURL('popup.html') + '#settings',
-      type: 'popup',
-      width: 800,
-      height: 700
-    });
+    chrome.tabs.create(
+      { url: chrome.runtime.getURL("popup.html") + "#settings" },
+      (tab) => {
+        if (tab.windowId !== undefined) {
+          chrome.windows.update(tab.windowId);
+        }
+      }
+    );
   }
   // 准备图表数据
   const chartData = {
@@ -343,13 +401,13 @@ export default function Popup() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 20V10" /><path d="M12 20V4" /><path d="M6 20V14" /></svg>
           Dashboard
         </button>
-        {/* <button 
+        <button
           onClick={handleSettingsClick}
-          className="flex-1 min-w-0 flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold transition-all text-slate-400 hover:bg-slate-100"
+          className="flex-1 min-w-0 flex items-center justify-center gap-2 py-3 rounded-xl border border-[#D2D5DB] text-xs font-bold transition-all text-[#165DFF] hover:bg-slate-100"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /><circle cx="12" cy="12" r="3" /></svg>
           Settings
-        </button> */}
+        </button>
       </nav>
     </div>
   )

@@ -13,22 +13,62 @@ interface TabInfo {
   activatedTime: number
 }
 
+interface Category {
+  id: string
+  name: string
+  color: string
+}
+
+interface DomainCategoryMap {
+  [domain: string]: string
+}
+
+interface StorageData {
+  webtimeData: TimeData
+  categories: Category[]
+  domainCategories: DomainCategoryMap
+}
+
 let currentTab: TabInfo | null = null
 let timeData: TimeData = {}
+let categories: Category[] = [
+  { id: "work", name: "Work", color: "#165DFF" },
+  { id: "entertainment", name: "Entertainment", color: "#1EC18C" },
+  { id: "social", name: "Social", color: "#FF8A3D" },
+  { id: "other", name: "Other", color: "#94A3B8" }
+]
+let domainCategories: DomainCategoryMap = {}
+
+// 内存存储作为回退
+let inMemoryStorage: StorageData = {
+  webtimeData: {},
+  categories: categories,
+  domainCategories: {}
+}
 
 // 从 storage 加载数据
 async function loadData() {
   return new Promise((resolve) => {
     try {
       if (!chrome?.storage?.local) {
-        console.warn("chrome.storage.local is not available")
+        console.warn("chrome.storage.local is not available, using in-memory storage")
+        // 使用内存存储
+        timeData = inMemoryStorage.webtimeData
+        categories = inMemoryStorage.categories
+        domainCategories = inMemoryStorage.domainCategories
         resolve(timeData)
         return
       }
 
-      chrome.storage.local.get(["webtimeData"], (result) => {
+      chrome.storage.local.get(["webtimeData", "categories", "domainCategories"], (result) => {
         if (result?.webtimeData) {
           timeData = result.webtimeData
+        }
+        if (result?.categories) {
+          categories = result.categories
+        }
+        if (result?.domainCategories) {
+          domainCategories = result.domainCategories
         }
         resolve(timeData)
       })
@@ -43,10 +83,20 @@ async function loadData() {
 function saveData() {
   try {
     if (!chrome?.storage?.local) {
-      console.warn("chrome.storage.local is not available")
+      console.warn("chrome.storage.local is not available, using in-memory storage")
+      // 保存到内存存储
+      inMemoryStorage = {
+        webtimeData: timeData,
+        categories: categories,
+        domainCategories: domainCategories
+      }
       return
     }
-    chrome.storage.local.set({ webtimeData: timeData })
+    chrome.storage.local.set({ 
+      webtimeData: timeData,
+      categories: categories,
+      domainCategories: domainCategories
+    })
   } catch (error) {
     console.error("Error saving data:", error)
   }
@@ -143,11 +193,20 @@ if (chrome?.runtime) {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getTimeData") {
       if (chrome?.storage?.local) {
-        chrome.storage.local.get(["webtimeData"], (result) => {
-          sendResponse(result?.webtimeData || {})
+        chrome.storage.local.get(["webtimeData", "categories", "domainCategories"], (result) => {
+          sendResponse({
+            timeData: result?.webtimeData || {},
+            categories: result?.categories || categories,
+            domainCategories: result?.domainCategories || domainCategories
+          })
         })
       } else {
-        sendResponse(timeData || {})
+        // 使用内存存储的数据
+        sendResponse({
+          timeData: inMemoryStorage.webtimeData || {},
+          categories: inMemoryStorage.categories || categories,
+          domainCategories: inMemoryStorage.domainCategories || domainCategories
+        })
       }
       return true
     }
