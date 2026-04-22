@@ -9,7 +9,7 @@ import {
   Tooltip,
   Legend,
 } from 'chart.js';
-import { Bar } from 'react-chartjs-2';
+import { Bar, Pie } from 'react-chartjs-2';
 // 2. 注册组件
 ChartJS.register(
   CategoryScale,
@@ -24,7 +24,7 @@ type SummaryCard = {
   title: string
   value: string
   subtitle: string
-  btnText: string
+  btnText?: string
   isPro?: boolean
 }
 
@@ -37,26 +37,108 @@ type TopSite = {
   isLocked: boolean
 }
 
+type Category = {
+  id: string
+  name: string
+  color: string
+}
+
 export default function Dashboard() {
   const [isPro, setIsPro] = useState(false)
   const [activeTab, setActiveTab] = useState("Dashboard")
   // ... 在组件内部添加搜索状态
   const [searchQuery, setSearchQuery] = useState("");
+  // 添加状态来存储从background.ts获取的数据
+  const [timeData, setTimeData] = useState<{ [domain: string]: { totalTime: number } }>({})
+  const [categories, setCategories] = useState<Category[]>([])
+  const [domainCategories, setDomainCategories] = useState<{ [domain: string]: string }>({})
+  const [dailyUsageData, setDailyUsageData] = useState<number[]>([0, 0, 0, 0, 0, 0, 0])
+  const [totalTime, setTotalTime] = useState(0)
+
+  // 时间格式化辅助函数 - 精确到秒
+  const formatTime = (seconds: number): string => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+
+    if (h > 0) {
+      return `${h}h ${m}m ${s}s`;
+    } else if (m > 0) {
+      return `${m}m ${s}s`;
+    } else {
+      return `${s}s`;
+    }
+  };
+
+  // 从background.ts获取数据
+  useEffect(() => {
+    const fetchTimeData = async () => {
+      try {
+        const response = await new Promise((resolve) => {
+          try {
+            if (!chrome?.runtime?.sendMessage) {
+              console.warn("chrome.runtime.sendMessage is not available")
+              resolve({ timeData: {}, categories: [], domainCategories: {} })
+              return
+            }
+
+            chrome.runtime.sendMessage(
+              { action: "getTimeData" },
+              (response) => {
+                resolve(response || { timeData: {}, categories: [], domainCategories: {} })
+              }
+            )
+          } catch (error) {
+            console.error("Error sending message:", error)
+            resolve({ timeData: {}, categories: [], domainCategories: {} })
+          }
+        }) as { timeData: Record<string, { totalTime: number }>, categories: Category[], domainCategories: { [domain: string]: string } }
+
+        const { timeData, categories, domainCategories } = response
+        setTimeData(timeData)
+        setCategories(categories)
+        setDomainCategories(domainCategories)
+
+        // 计算总时间
+        const totalSeconds = Object.values(timeData).reduce((sum, data) => sum + data?.totalTime, 0)
+        setTotalTime(totalSeconds)
+
+        // 生成模拟的每日数据（实际应用中应该从存储中获取每日数据）
+        const today = new Date()
+        const dailyData = []
+        for (let i = 6; i >= 0; i--) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          // 这里使用随机数据作为示例，实际应该从存储中获取对应日期的数据
+          const dayData = Math.floor(Math.random() * 100)
+          dailyData.push(dayData)
+        }
+        setDailyUsageData(dailyData)
+      } catch (error) {
+        console.error("Error fetching time data:", error)
+      }
+    }
+
+    fetchTimeData()
+    // 每30秒刷新一次数据
+    const interval = setInterval(fetchTimeData, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   // --- 柱状图数据配置 ---
   const barData = {
     labels: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
     datasets: [
       {
-        data: [40, 70, 45, 90, 65, 30, 50],
-        // 通过回调函数实现：周四（索引3）为蓝色，其他为浅灰色
+        data: dailyUsageData,
+        // 通过回调函数实现：今天为蓝色，其他为浅灰色
         backgroundColor: (context: any) => {
           const index = context.dataIndex;
-          return index === 3 ? '#165DFF' : '#F1F5F9';
+          return index === 6 ? '#165DFF' : '#F1F5F9'; // 假设索引6是今天
         },
         hoverBackgroundColor: (context: any) => {
           const index = context.dataIndex;
-          return index === 3 ? '#144FE0' : '#E2E8F0';
+          return index === 6 ? '#144FE0' : '#E2E8F0';
         },
         borderRadius: 20, // 高度还原图片中的圆润感
         borderSkipped: false, // 确保四个角都是圆的
@@ -101,24 +183,94 @@ export default function Dashboard() {
       easing: 'easeOutQuart' as const
     }
   };
-  // 模拟数据
+  // 分类权重配置
+  const categoryWeights = {
+    work: 1.0,
+    entertainment: 0.3,
+    social: 0.6,
+    other: 0.5
+  };
+
+  // 计算生产力分数
+  const calculateProductivityScore = () => {
+    // 计算各分类的总时间
+    const categoryTime: { [categoryId: string]: number } = {};
+    let totalTime = 0;
+
+    Object.entries(timeData).forEach(([domain, data]) => {
+      const categoryId = domainCategories[domain] || "other";
+      if (!categoryTime[categoryId]) {
+        categoryTime[categoryId] = 0;
+      }
+      categoryTime[categoryId] += data.totalTime;
+      totalTime += data.totalTime;
+    });
+
+    // 计算生产力分数
+    let productivityScore = 0;
+    Object.entries(categoryTime).forEach(([categoryId, time]) => {
+      const weight = categoryWeights[categoryId as keyof typeof categoryWeights] || 0.5;
+      const timeRatio = totalTime > 0 ? time / totalTime : 0;
+      productivityScore += weight * timeRatio;
+    });
+
+    // 转换为百分比
+    productivityScore = Math.round(productivityScore * 100);
+
+    // 确定分数等级
+    let scoreLevel = "Low";
+    if (productivityScore >= 80) {
+      scoreLevel = "High";
+    } else if (productivityScore >= 60) {
+      scoreLevel = "Medium";
+    }
+
+    return {
+      score: productivityScore,
+      level: scoreLevel
+    };
+  };
+
+  // 计算生产力分数
+  const productivity = calculateProductivityScore();
+
+  // 生成汇总数据
   const summaryData: SummaryCard[] = [
-    { title: "Total Time", value: "21h 30m", subtitle: "Total browsing time", btnText: "Export CSV" },
+    { title: "Total Time", value: formatTime(totalTime), subtitle: "Total browsing time", btnText: "Export CSV" },
     // { title: "Focus Time", value: "10h 12m", subtitle: "Time spent focusing", btnText: "Export CSV" },
-    { title: "Productivity Score", value: "80 High", subtitle: "Productive browsing percentage", btnText: "Export PRO", isPro: true },
+    { title: "Productivity Score", value: `${productivity.score} ${productivity.level}`, subtitle: "Productive browsing percentage", btnText: "Export PRO", isPro: true },
   ]
 
-  const topSites: TopSite[] = [
-    { rank: 1, domain: "google.com", totalTime: "5h 32m", focusTime: "4h 20m", productivity: 91, isLocked: false },
-    { rank: 2, domain: "youtube.com", totalTime: "4h 10m", focusTime: "31%", productivity: "Locked PRO", isLocked: true },
-    { rank: 3, domain: "facebook.com", totalTime: "3h 14m", focusTime: "31%", productivity: "Locked PRO", isLocked: true },
-    { rank: 4, domain: "news.com", totalTime: "2h 18m", focusTime: "—", productivity: "Locked PRO", isLocked: true },
-    { rank: 5, domain: "reddit.com", totalTime: "1h 55m", focusTime: "—", productivity: "Locked PRO", isLocked: true },
-  ]
-  for (let i = 0; i < 100; i++) {
-    topSites.push({ ...topSites[i % topSites.length], rank: i + 1 });
-  }
-  // 假设 topSites 是一个包含 100 条数据的数组
+  // 从timeData生成topSites数据
+  const topSites: any[] = Object.entries(timeData)
+    .map(([domain, data]) => {
+      // 获取网站的分类
+      const categoryId = domainCategories[domain] || "other"
+      // 根据分类计算生产力分数
+      const weight = categoryWeights[categoryId as keyof typeof categoryWeights] || 0.5
+      const productivityScore = Math.round(weight * 100)
+      
+      return {
+        rank: 0, // 稍后会重新计算排名
+        domain,
+        totalTime: formatTime(data.totalTime),
+        focusTime: "4h 20m", // 这里可以从数据中获取focusTime
+        productivity: productivityScore, // 使用计算出的生产力分数
+        isLocked: false,
+        actualTime: data.totalTime // 存储实际的总时间值用于排序
+      }
+    })
+    .sort((a, b) => {
+      // 按实际总时间值排序，时间越长排名越高
+      return b.actualTime - a.actualTime
+    })
+    .map((site, index) => ({
+      ...site,
+      rank: index + 1 // 重新计算排名
+    }))
+    .slice(0, 100); // 限制为100个网站
+
+  // 过滤网站
   const filteredSites = topSites.filter(site =>
     site.domain.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -136,10 +288,20 @@ export default function Dashboard() {
           </div>
 
           <nav className="flex items-center gap-8">
-            {['Dashboard', 'Reports', 'Settings', 'Upgrade'].map((tab) => (
+            {/* {['Dashboard', 'Reports', 'Settings', 'Upgrade'].map((tab) => ( */}
+            {['Settings'].map((tab) => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => {
+                  chrome.tabs.create(
+                    { url: chrome.runtime.getURL("popup.html") + "#settings" },
+                    (tab) => {
+                      if (tab.windowId !== undefined) {
+                        chrome.windows.update(tab.windowId);
+                      }
+                    }
+                  );
+                }}
                 className={`text-sm font-bold transition-all relative py-1 ${activeTab === tab ? 'text-[#165DFF]' : 'text-slate-400 hover:text-slate-600'
                   }`}
               >
@@ -173,7 +335,20 @@ export default function Dashboard() {
                       {idx === 1 && '🎯'}
                       {idx === 2 && '🛡'}
                     </div>
-                    <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">{card.title}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-400 uppercase tracking-wider">{card.title}</span>
+                      {idx === 1 && (
+                        <div className="relative group">
+                          <span className="text-slate-400 hover:text-slate-600 cursor-help">ℹ️</span>
+                          <div className="absolute top-full left-0 mt-2 w-64 bg-slate-800 text-white p-3 rounded-lg text-xs font-medium opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                            <p className="font-bold mb-1">Productivity Score</p>
+                            <p>衡量您的浏览时间生产力的指标，基于不同分类网站的权重计算。</p>
+                            <p className="mt-2">工作类网站权重最高(1.0)，娱乐类网站权重最低(0.3)。</p>
+                            <p className="mt-1">分数越高，表示您的网络使用越具生产力。</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <h2 className={`text-4xl font-extrabold ${idx === 2 ? 'text-emerald-500' : 'text-[#165DFF]'} tracking-tighter`}>
                     {card.value}
@@ -225,7 +400,115 @@ export default function Dashboard() {
             <section className="col-span-2 bg-white rounded-[32px] p-8 border border-slate-100 shadow-[0_15px_40px_rgba(0,0,0,0.02)]">
               <h3 className="text-lg font-black text-slate-800 mb-8 uppercase tracking-tight">Daily Usage</h3>
               <div className="h-[220px] w-full">
-                <Bar data={barData} options={barOptions} />
+                {(() => {
+                  // 生成过去7天的日期标签和日期对象
+                  const labels = []
+                  const dates = []
+                  const today = new Date()
+
+                  // 重置时间为当天开始
+                  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0)
+
+                  for (let i = 6; i >= 0; i--) {
+                    const date = new Date(todayStart)
+                    date.setDate(date.getDate() - i)
+                    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' })
+                    labels.push(dayName)
+                    dates.push(date)
+                  }
+
+                  // 计算每天的使用时间（分钟）
+                  const dailyData = dates.map((date, index) => {
+                    // 计算当天开始和结束时间戳
+                    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0).getTime()
+                    const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999).getTime()
+
+                    // 计算当天的总使用时间
+                    let dayTotal = 0
+
+                    Object.entries(timeData).forEach(([domain, data]) => {
+                      // 这里简化处理，实际应该根据每个网站的lastActive时间来判断是否属于当天
+                      // 目前我们假设所有时间数据都属于当天
+                      // 实际应用中，需要在background.ts中存储每个网站的每日使用时间
+                      if (index === 6) { // 今天
+                        dayTotal += data.totalTime
+                      }
+                    })
+
+                    // 转换为分钟
+                    return Math.floor(dayTotal / 60)
+                  })
+
+                  // 柱状图数据
+                  const barData = {
+                    labels: labels,
+                    datasets: [
+                      {
+                        data: dailyData,
+                        // 通过回调函数实现：今天为蓝色，其他为浅灰色
+                        backgroundColor: (context: any) => {
+                          const index = context.dataIndex;
+                          return index === 6 ? '#165DFF' : '#F1F5F9'; // 索引6是今天
+                        },
+                        hoverBackgroundColor: (context: any) => {
+                          const index = context.dataIndex;
+                          return index === 6 ? '#144FE0' : '#E2E8F0';
+                        },
+                        borderRadius: 20, // 高度还原图片中的圆润感
+                        borderSkipped: false, // 确保四个角都是圆的
+                        barThickness: 32, // 控制柱子宽度
+                      },
+                    ],
+                  };
+
+                  // 柱状图配置
+                  const barOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: { display: false }, // 隐藏图例
+                      tooltip: {
+                        backgroundColor: '#1E293B',
+                        padding: 12,
+                        titleFont: { size: 12, weight: 'bold' as const },
+                        bodyFont: { size: 12 },
+                        cornerRadius: 12,
+                        displayColors: false,
+                        callbacks: {
+                          label: (context: any) => {
+                            const value = context.raw
+                            // 转换为小时和分钟
+                            const hours = Math.floor(value / 60)
+                            const minutes = value % 60
+                            return `Usage: ${hours}h ${minutes}m`
+                          }
+                        }
+                      }
+                    },
+                    scales: {
+                      x: {
+                        grid: { display: false }, // 隐藏网格线
+                        border: { display: false }, // 隐藏轴线
+                        ticks: {
+                          color: '#94A3B8',
+                          font: { size: 11, weight: '900' as const },
+                          padding: 10,
+                        }
+                      },
+                      y: {
+                        display: false, // 隐藏Y轴以保持极简视觉
+                        grid: { display: false },
+                      }
+                    },
+                    // 增加鼠标交互动画
+                    animation: {
+                      duration: 1000,
+                      easing: 'easeOutQuart' as const
+                    }
+                  };
+
+                  return <Bar data={barData} options={barOptions} />
+                })()}
               </div>
             </section>
 
@@ -233,23 +516,152 @@ export default function Dashboard() {
             <div className="bg-white rounded-[32px] p-8 shadow-sm border border-slate-50 flex flex-col items-center">
               <h3 className="w-full text-left text-lg font-bold text-slate-800 mb-8">Category Distribution</h3>
               <div className="relative w-48 h-48 mb-8">
-                {/* Donut Implementation with CSS Conic Gradient */}
-                <div className="w-full h-full rounded-full" style={{ background: 'conic-gradient(#165DFF 0 46%, #1EC18C 46% 78%, #FF8A3D 78% 100%)' }} />
-                <div className="absolute inset-[18%] bg-white rounded-full flex flex-col items-center justify-center shadow-inner">
-                  <p className="text-[10px] font-bold text-slate-300 uppercase">Top Use</p>
-                  <p className="text-xl font-black text-slate-800">Work</p>
+                {/* 使用Chart.js Pie组件 */}
+                {(() => {
+                  // 计算各分类的时间
+                  const categoryTime: { [categoryId: string]: number } = {}
+
+                  // 初始化各分类时间为0
+                  categories.forEach(category => {
+                    categoryTime[category.id] = 0
+                  })
+
+                  // 遍历所有域名，按分类累加时间
+                  Object.entries(timeData).forEach(([domain, data]) => {
+                    const categoryId = domainCategories[domain] || "other"
+                    categoryTime[categoryId] += data?.totalTime || 0
+                  })
+
+                  // 生成饼图数据
+                  const pieData = {
+                    labels: categories.map(cat => cat.name),
+                    datasets: [
+                      {
+                        data: categories.map(cat => categoryTime[cat.id] || 0),
+                        backgroundColor: categories.map(cat => cat.color),
+                        borderWidth: 0,
+                        hoverOffset: 0
+                      }
+                    ]
+                  }
+
+                  // 时间格式化函数
+                  const formatTooltipTime = (seconds: number): string => {
+                    const h = Math.floor(seconds / 3600);
+                    const m = Math.floor((seconds % 3600) / 60);
+                    const s = Math.floor(seconds % 60);
+
+                    if (h > 0) {
+                      return `${h}h ${m}m ${s}s`;
+                    } else if (m > 0) {
+                      return `${m}m ${s}s`;
+                    } else {
+                      return `${s}s`;
+                    }
+                  };
+
+                  // 饼图配置
+                  const pieOptions = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                      legend: {
+                        display: false
+                      },
+                      tooltip: {
+                        enabled: true,
+                        backgroundColor: '#1E293B',
+                        padding: 12,
+                        titleFont: { size: 12, weight: 'bold' as const },
+                        bodyFont: { size: 12 },
+                        cornerRadius: 12,
+                        callbacks: {
+                          label: (context: any) => {
+                            const categoryIndex = context.dataIndex;
+                            const category = categories[categoryIndex];
+                            const time = categoryTime[category.id] || 0;
+                            const total = Object.values(categoryTime).reduce((sum, t) => sum + t, 0);
+                            const percent = total > 0 ? Math.round((time / total) * 100) : 0;
+                            return `${category.name}: ${formatTooltipTime(time)} (${percent}%)`;
+                          }
+                        }
+                      }
+                    },
+                    cutout: '70%' // 甜甜圈图
+                  }
+
+                  return (
+                    <Pie data={pieData} options={pieOptions} />
+                  )
+                })()}
+                {/* 中心文本 */}
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <p className="text-[12px] font-bold text-slate-300 uppercase">Top Use</p>
+                  <p className="text-[14px] text-xl font-black text-slate-800">
+                    {(() => {
+                      // 找出使用时间最多的分类
+                      const categoryTime: { [categoryId: string]: number } = {}
+
+                      categories.forEach(category => {
+                        categoryTime[category.id] = 0
+                      })
+
+                      Object.entries(timeData).forEach(([domain, data]) => {
+                        const categoryId = domainCategories[domain] || "other"
+                        categoryTime[categoryId] += data?.totalTime || 0
+                      })
+
+                      let maxTime = 0
+                      let topCategory = "Other"
+
+                      Object.entries(categoryTime).forEach(([categoryId, time]) => {
+                        if (time > maxTime) {
+                          maxTime = time
+                          const category = categories.find(cat => cat.id === categoryId)
+                          if (category) {
+                            topCategory = category.name
+                          }
+                        }
+                      })
+
+                      return topCategory
+                    })()}
+                  </p>
                 </div>
-                {/* Labels on Chart */}
-                <span className="absolute top-1/4 right-4 text-[11px] font-bold text-white">46%</span>
-                <span className="absolute bottom-8 left-8 text-[11px] font-bold text-white">32%</span>
-                <span className="absolute top-8 left-12 text-[11px] font-bold text-white">22%</span>
               </div>
               <div className="w-full space-y-4">
-                {[
-                  { label: "Work", color: "#165DFF", val: "9h 42m", p: 46 },
-                  { label: "Entertainment", color: "#1EC18C", val: "6h 47m", p: 32 },
-                  { label: "Social", color: "#FF8A3D", val: "5h 01m", p: 22 },
-                ].map(cat => (
+                {(() => {
+                  // 计算各分类的时间
+                  const categoryTime: { [categoryId: string]: number } = {}
+
+                  // 初始化各分类时间为0
+                  categories.forEach(category => {
+                    categoryTime[category.id] = 0
+                  })
+
+                  // 遍历所有域名，按分类累加时间
+                  Object.entries(timeData).forEach(([domain, data]) => {
+                    const categoryId = domainCategories[domain] || "other"
+                    categoryTime[categoryId] += data?.totalTime || 0
+                  })
+
+                  // 计算总时间
+                  const totalSeconds = Object.values(timeData).reduce((sum, data) => sum + data?.totalTime, 0)
+
+                  // 生成分类数据
+                  return categories
+                    .map(category => {
+                      const time = categoryTime[category.id] || 0
+                      const percent = totalSeconds > 0 ? Math.round((time / totalSeconds) * 100) : 0
+                      return {
+                        label: category.name,
+                        color: category.color,
+                        val: formatTime(time),
+                        p: percent
+                      }
+                    })
+                    .filter(item => item.p > 0) // 只显示有时间的分类
+                })().map(cat => (
                   <div key={cat.label} className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
@@ -327,29 +739,46 @@ export default function Dashboard() {
                     <tr className="text-[10px] font-black text-slate-300 uppercase tracking-widest">
                       <th className="pb-4 border-b border-slate-50">Rank</th>
                       <th className="pb-4 border-b border-slate-50">Website</th>
+                      <th className="pb-4 border-b border-slate-50 text-center">Category</th>
                       <th className="pb-4 border-b border-slate-50 text-center">Total Time</th>
                       <th className="pb-4 border-b border-slate-50 text-right">Productivity</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {filteredSites.map((site) => (
-                      <tr key={site.rank} className="hover:bg-slate-50 transition-colors group">
-                        <td className="py-4">
-                          <span className="text-xs font-black text-slate-400">{site.rank}</span>
-                        </td>
-                        <td className="py-4">
-                          <div className="flex items-center gap-2">
-                            {/* 可以加个 favicon 占位符 */}
-                            <div className="w-6 h-6 bg-slate-100 rounded-lg" />
-                            <span className="font-bold text-sm text-slate-700">{site.domain}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 text-center text-xs font-bold text-slate-500">{site.totalTime}</td>
-                        <td className="py-4 text-right">
-                          <span className="text-xs font-black text-[#165DFF]">{site.productivity}</span>
-                        </td>
-                      </tr>
-                    ))}
+                    {filteredSites.map((site) => {
+                      // 获取网站的分类
+                      const categoryId = domainCategories[site.domain] || "other"
+                      const category = categories.find(cat => cat.id === categoryId) || { name: "Other", color: "#94A3B8" }
+
+                      return (
+                        <tr key={site.rank} className="hover:bg-slate-50 transition-colors group">
+                          <td className="py-4">
+                            <span className="text-xs font-black text-slate-400">{site.rank}</span>
+                          </td>
+                          <td className="py-4">
+                            <div className="flex items-center gap-2">
+                              {/* 显示网站的favicon */}
+                              <img
+                                src={`https://www.google.com/s2/favicons?domain=${site.domain}&sz=64`}
+                                className="w-6 h-6 rounded-lg"
+                                alt={`${site.domain} favicon`}
+                              />
+                              <span className="font-bold text-sm text-slate-700">{site.domain}</span>
+                            </div>
+                          </td>
+                          <td className="py-4 text-center">
+                            <div className="flex items-center justify-center gap-2">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: category.color }} />
+                              <span className="text-xs font-bold text-slate-500">{category.name}</span>
+                            </div>
+                          </td>
+                          <td className="py-4 text-center text-xs font-bold text-slate-500">{site.totalTime}</td>
+                          <td className="py-4 text-right">
+                            <span className="text-xs font-black text-[#165DFF]">{site.productivity}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
 
@@ -372,14 +801,54 @@ export default function Dashboard() {
             <div className="bg-white rounded-[32px] p-8 shadow-sm border border-slate-50">
               <div className="flex items-center justify-between mb-8">
                 <h3 className="text-lg font-bold text-slate-800">Category</h3>
-                <button className="text-[10px] font-bold bg-slate-50 text-slate-400 px-3 py-1.5 rounded-lg border border-slate-100 flex items-center gap-1">🔒 Export PRO</button>
+                {/* <button className="text-[10px] font-bold bg-slate-50 text-slate-400 px-3 py-1.5 rounded-lg border border-slate-100 flex items-center gap-1">🔒 Export PRO</button> */}
               </div>
               <div className="space-y-6">
-                {[
-                  { label: "Work", val: "9h 42m", p: 46, color: "#165DFF" },
-                  { label: "Entertainment", val: "6h 47m", p: 32, color: "#1EC18C" },
-                  { label: "Social", val: "5h 01m", p: 22, color: "#FF8A3D" },
-                ].map(item => (
+                {(() => {
+                  // 计算各分类的时间
+                  const categoryTime: { [categoryId: string]: number } = {}
+
+                  // 初始化各分类时间为0
+                  categories.forEach(category => {
+                    categoryTime[category.id] = 0
+                  })
+
+                  // 遍历所有域名，按分类累加时间
+                  Object.entries(timeData).forEach(([domain, data]) => {
+                    const categoryId = domainCategories[domain] || "other"
+                    categoryTime[categoryId] += data?.totalTime || 0
+                  })
+
+                  // 计算总时间
+                  const totalSeconds = Object.values(timeData).reduce((sum, data) => sum + data?.totalTime, 0)
+                  console.log("categories", categories)
+                  console.log("categoryTime", categoryTime)
+                  console.log("result", categories
+                    .map(category => {
+                      const time = categoryTime[category.id] || 0
+                      const percent = totalSeconds > 0 ? Math.round((time / totalSeconds) * 100) : 0
+                      return {
+                        label: category.name,
+                        val: formatTime(time),
+                        p: percent,
+                        color: category.color
+                      }
+                    })
+                    .filter(item => item.p > 0))
+                  // 生成分类数据
+                  return categories
+                    .map(category => {
+                      const time = categoryTime[category.id] || 0
+                      const percent = totalSeconds > 0 ? Math.round((time / totalSeconds) * 100) : 0
+                      return {
+                        label: category.name,
+                        val: formatTime(time),
+                        p: percent,
+                        color: category.color
+                      }
+                    })
+                    .filter(item => item.p > 0) // 只显示有时间的分类
+                })().map(item => (
                   <div key={item.label} className="flex items-center gap-4">
                     <div className="w-1.5 h-12 rounded-full" style={{ backgroundColor: item.color }} />
                     <div className="flex-1">
