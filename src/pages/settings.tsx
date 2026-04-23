@@ -347,7 +347,7 @@ export default function Settings() {
         </section>
 
         {/* Notifications Card */}
-        <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        {/* <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
           <h2 className="text-lg font-bold mb-4">Notifications & Alerts</h2>
           <div className="flex items-start justify-between">
             <div className="space-y-2">
@@ -363,7 +363,7 @@ export default function Settings() {
               <p className="text-xs text-slate-500">Get a notification when you reach your daily usage limit.</p>
             </div>
           </div>
-        </section>
+        </section> */}
 
         {/* Privacy Card */}
         <section className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
