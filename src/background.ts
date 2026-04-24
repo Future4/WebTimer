@@ -106,6 +106,12 @@ function saveData() {
 function extractDomain(url: string): string {
   try {
     const urlObj = new URL(url)
+    
+    // 排除扩展自身的页面
+    if (urlObj.protocol === "chrome-extension:") {
+      return "extension"
+    }
+    
     return urlObj.hostname
   } catch {
     return "unknown"
@@ -114,6 +120,11 @@ function extractDomain(url: string): string {
 
 // 初始化数据结构
 function initDomain(domain: string) {
+  // 排除扩展自身的页面
+  if (domain === "extension") {
+    return
+  }
+  
   if (!timeData[domain]) {
     timeData[domain] = {
       totalTime: 0,
@@ -140,14 +151,20 @@ if (chrome?.tabs) {
     chrome.tabs.get(activeInfo.tabId, (tab) => {
       if (tab?.url) {
         const domain = extractDomain(tab.url)
-        currentTab = {
-          tabId: activeInfo.tabId,
-          domain,
-          activatedTime: Date.now()
+        // 排除扩展自身的页面
+        if (domain !== "extension") {
+          currentTab = {
+            tabId: activeInfo.tabId,
+            domain,
+            activatedTime: Date.now()
+          }
+          initDomain(domain)
+          timeData[domain].lastActive = Date.now()
+          saveData()
+        } else {
+          // 如果是扩展自身的页面，不跟踪
+          currentTab = null
         }
-        initDomain(domain)
-        timeData[domain].lastActive = Date.now()
-        saveData()
       }
     })
   })
@@ -160,16 +177,25 @@ if (chrome?.tabs) {
       if (currentTab?.tabId === tabId && currentTab.domain !== domain) {
         // 用户在同一标签页导航到不同网站
         const timeSpent = Date.now() - currentTab.activatedTime
-        initDomain(currentTab.domain)
-        timeData[currentTab.domain].totalTime += Math.floor(timeSpent / 1000)
-
-        currentTab = {
-          tabId,
-          domain,
-          activatedTime: Date.now()
+        // 只统计非扩展页面的时间
+        if (currentTab.domain !== "extension") {
+          initDomain(currentTab.domain)
+          timeData[currentTab.domain].totalTime += Math.floor(timeSpent / 1000)
         }
-        initDomain(domain)
-        saveData()
+
+        // 只跟踪非扩展页面
+        if (domain !== "extension") {
+          currentTab = {
+            tabId,
+            domain,
+            activatedTime: Date.now()
+          }
+          initDomain(domain)
+          saveData()
+        } else {
+          // 如果是扩展自身的页面，不跟踪
+          currentTab = null
+        }
       }
     }
   })
@@ -180,9 +206,12 @@ if (chrome?.tabs) {
 
     if (currentTab?.tabId === tabId && currentTab) {
       const timeSpent = Date.now() - currentTab.activatedTime
-      initDomain(currentTab.domain)
-      timeData[currentTab.domain].totalTime += Math.floor(timeSpent / 1000)
-      saveData()
+      // 只统计非扩展页面的时间
+      if (currentTab.domain !== "extension") {
+        initDomain(currentTab.domain)
+        timeData[currentTab.domain].totalTime += Math.floor(timeSpent / 1000)
+        saveData()
+      }
       currentTab = null
     }
   })
