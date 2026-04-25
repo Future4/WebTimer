@@ -311,9 +311,9 @@ export default function Dashboard() {
             ))}
             <div className="h-6 w-[1px] bg-slate-200 mx-2" />
             <div className="flex items-center gap-4">
-              <button className="bg-[#165DFF] text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-md shadow-blue-100 hover:scale-105 transition">
+              {/* <button className="bg-[#165DFF] text-white px-6 py-2.5 rounded-xl text-sm font-bold shadow-md shadow-blue-100 hover:scale-105 transition">
                 Upgrade
-              </button>
+              </button> */}
               <div className="w-10 h-10 bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
                 <img src="https://ui-avatars.com/api/?name=User&background=EEF2FF&color=165DFF" alt="avatar" />
               </div>
