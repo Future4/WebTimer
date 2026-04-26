@@ -88,10 +88,14 @@ export default function Settings() {
   }
 
   const clearLocalData = () => {
-    if (confirm("Are you sure you want to clear all local data?")) {
-      chrome?.storage?.local?.clear(() => {
-        setStatusMessage("Local data cleared.")
+    if (confirm("Are you sure you want to clear WebTimer data?")) {
+      // 只清除WebTimer相关的数据，而不是所有数据
+      const webTimerKeys = ["webtimeData", "categories", "domainCategories", "settingsState"]
+      chrome?.storage?.local?.remove(webTimerKeys, () => {
+        setStatusMessage("WebTimer data cleared.")
         setTimeout(() => setStatusMessage(""), 2000)
+        // 重新加载数据，以反映清除后的状态
+        window.location.reload()
       })
     }
   }
