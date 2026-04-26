@@ -52,6 +52,7 @@ export default function Dashboard() {
   const [timeData, setTimeData] = useState<{ [domain: string]: { totalTime: number } }>({})
   const [categories, setCategories] = useState<Category[]>([])
   const [domainCategories, setDomainCategories] = useState<{ [domain: string]: string }>({})
+  const [dailyUsage, setDailyUsage] = useState<{ [date: string]: number }>({})
   const [dailyUsageData, setDailyUsageData] = useState<number[]>([0, 0, 0, 0, 0, 0, 0])
   const [totalTime, setTotalTime] = useState(0)
 
@@ -78,26 +79,27 @@ export default function Dashboard() {
           try {
             if (!chrome?.runtime?.sendMessage) {
               console.warn("chrome.runtime.sendMessage is not available")
-              resolve({ timeData: {}, categories: [], domainCategories: {} })
+              resolve({ timeData: {}, categories: [], domainCategories: {}, dailyUsage: {} })
               return
             }
 
             chrome.runtime.sendMessage(
               { action: "getTimeData" },
               (response) => {
-                resolve(response || { timeData: {}, categories: [], domainCategories: {} })
+                resolve(response || { timeData: {}, categories: [], domainCategories: {}, dailyUsage: {} })
               }
             )
           } catch (error) {
             console.error("Error sending message:", error)
-            resolve({ timeData: {}, categories: [], domainCategories: {} })
+            resolve({ timeData: {}, categories: [], domainCategories: {}, dailyUsage: {} })
           }
-        }) as { timeData: Record<string, { totalTime: number }>, categories: Category[], domainCategories: { [domain: string]: string } }
+        }) as { timeData: Record<string, { totalTime: number }>, categories: Category[], domainCategories: { [domain: string]: string }, dailyUsage: { [date: string]: number } }
 
-        const { timeData, categories, domainCategories } = response
+        const { timeData, categories, domainCategories, dailyUsage } = response
         setTimeData(timeData)
         setCategories(categories)
         setDomainCategories(domainCategories)
+        setDailyUsage(dailyUsage)
 
         // 计算总时间
         const totalSeconds = Object.values(timeData).reduce((sum, data) => sum + data?.totalTime, 0)
@@ -405,10 +407,10 @@ export default function Dashboard() {
                   const labels = []
                   const dates = []
                   const today = new Date()
-
+                  
                   // 重置时间为当天开始
                   const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0)
-
+                  
                   for (let i = 6; i >= 0; i--) {
                     const date = new Date(todayStart)
                     date.setDate(date.getDate() - i)
@@ -416,29 +418,17 @@ export default function Dashboard() {
                     labels.push(dayName)
                     dates.push(date)
                   }
-
+                  
                   // 计算每天的使用时间（分钟）
-                  const dailyData = dates.map((date, index) => {
-                    // 计算当天开始和结束时间戳
-                    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0).getTime()
-                    const dayEnd = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999).getTime()
-
-                    // 计算当天的总使用时间
-                    let dayTotal = 0
-
-                    Object.entries(timeData).forEach(([domain, data]) => {
-                      // 这里简化处理，实际应该根据每个网站的lastActive时间来判断是否属于当天
-                      // 目前我们假设所有时间数据都属于当天
-                      // 实际应用中，需要在background.ts中存储每个网站的每日使用时间
-                      if (index === 6) { // 今天
-                        dayTotal += data.totalTime
-                      }
-                    })
-
+                  const dailyData = dates.map((date) => {
+                    // 格式化为YYYY-MM-DD格式
+                    const dateKey = date.toISOString().split('T')[0]
+                    // 从dailyUsage中获取对应日期的使用时间，如果没有则为0
+                    const seconds = dailyUsage[dateKey] || 0
                     // 转换为分钟
-                    return Math.floor(dayTotal / 60)
+                    return Math.floor(seconds / 60)
                   })
-
+                  
                   // 柱状图数据
                   const barData = {
                     labels: labels,
@@ -448,11 +438,15 @@ export default function Dashboard() {
                         // 通过回调函数实现：今天为蓝色，其他为浅灰色
                         backgroundColor: (context: any) => {
                           const index = context.dataIndex;
-                          return index === 6 ? '#165DFF' : '#F1F5F9'; // 索引6是今天
+                          // 找到今天的索引
+                          const todayIndex = labels.indexOf(today.toLocaleDateString('en-US', { weekday: 'short' }))
+                          return index === todayIndex ? '#165DFF' : '#F1F5F9';
                         },
                         hoverBackgroundColor: (context: any) => {
                           const index = context.dataIndex;
-                          return index === 6 ? '#144FE0' : '#E2E8F0';
+                          // 找到今天的索引
+                          const todayIndex = labels.indexOf(today.toLocaleDateString('en-US', { weekday: 'short' }))
+                          return index === todayIndex ? '#144FE0' : '#E2E8F0';
                         },
                         borderRadius: 20, // 高度还原图片中的圆润感
                         borderSkipped: false, // 确保四个角都是圆的
@@ -460,7 +454,7 @@ export default function Dashboard() {
                       },
                     ],
                   };
-
+                  
                   // 柱状图配置
                   const barOptions = {
                     responsive: true,
@@ -475,6 +469,10 @@ export default function Dashboard() {
                         cornerRadius: 12,
                         displayColors: false,
                         callbacks: {
+                          title: (context: any) => {
+                            const index = context[0].dataIndex
+                            return labels[index]
+                          },
                           label: (context: any) => {
                             const value = context.raw
                             // 转换为小时和分钟
@@ -506,7 +504,7 @@ export default function Dashboard() {
                       easing: 'easeOutQuart' as const
                     }
                   };
-
+                  
                   return <Bar data={barData} options={barOptions} />
                 })()}
               </div>

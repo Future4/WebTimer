@@ -7,6 +7,11 @@ interface TimeData {
   }
 }
 
+// 每日使用时间数据结构
+interface DailyUsage {
+  [date: string]: number // 日期字符串 -> 总使用时间（秒）
+}
+
 interface TabInfo {
   tabId: number
   domain: string
@@ -27,10 +32,13 @@ interface StorageData {
   webtimeData: TimeData
   categories: Category[]
   domainCategories: DomainCategoryMap
+  dailyUsage: DailyUsage
 }
 
 let currentTab: TabInfo | null = null
 let timeData: TimeData = {}
+// 存储每日使用时间
+let dailyUsage: DailyUsage = {}
 let categories: Category[] = [
   { id: "work", name: "Work", color: "#165DFF" },
   { id: "entertainment", name: "Entertainment", color: "#1EC18C" },
@@ -43,7 +51,8 @@ let domainCategories: DomainCategoryMap = {}
 let inMemoryStorage: StorageData = {
   webtimeData: {},
   categories: categories,
-  domainCategories: {}
+  domainCategories: {},
+  dailyUsage: {}
 }
 
 // 从 storage 加载数据
@@ -56,11 +65,12 @@ async function loadData() {
         timeData = inMemoryStorage.webtimeData
         categories = inMemoryStorage.categories
         domainCategories = inMemoryStorage.domainCategories
+        dailyUsage = inMemoryStorage.dailyUsage || {}
         resolve(timeData)
         return
       }
 
-      chrome.storage.local.get(["webtimeData", "categories", "domainCategories"], (result) => {
+      chrome.storage.local.get(["webtimeData", "categories", "domainCategories", "dailyUsage"], (result) => {
         if (result?.webtimeData) {
           timeData = result.webtimeData
         }
@@ -69,6 +79,9 @@ async function loadData() {
         }
         if (result?.domainCategories) {
           domainCategories = result.domainCategories
+        }
+        if (result?.dailyUsage) {
+          dailyUsage = result.dailyUsage
         }
         resolve(timeData)
       })
@@ -88,14 +101,16 @@ function saveData() {
       inMemoryStorage = {
         webtimeData: timeData,
         categories: categories,
-        domainCategories: domainCategories
+        domainCategories: domainCategories,
+        dailyUsage: dailyUsage
       }
       return
     }
     chrome.storage.local.set({ 
       webtimeData: timeData,
       categories: categories,
-      domainCategories: domainCategories
+      domainCategories: domainCategories,
+      dailyUsage: dailyUsage
     })
   } catch (error) {
     console.error("Error saving data:", error)
@@ -142,8 +157,17 @@ if (chrome?.tabs) {
     // 如果之前有活跃标签页，计算停留时间
     if (currentTab) {
       const timeSpent = Date.now() - currentTab.activatedTime
+      const secondsSpent = Math.floor(timeSpent / 1000) // 转换为秒
       initDomain(currentTab.domain)
-      timeData[currentTab.domain].totalTime += Math.floor(timeSpent / 1000) // 转换为秒
+      timeData[currentTab.domain].totalTime += secondsSpent
+      
+      // 更新每日使用时间
+      const today = new Date().toISOString().split('T')[0] // 格式：YYYY-MM-DD
+      if (!dailyUsage[today]) {
+        dailyUsage[today] = 0
+      }
+      dailyUsage[today] += secondsSpent
+      
       saveData()
     }
 
@@ -177,10 +201,18 @@ if (chrome?.tabs) {
       if (currentTab?.tabId === tabId && currentTab.domain !== domain) {
         // 用户在同一标签页导航到不同网站
         const timeSpent = Date.now() - currentTab.activatedTime
+        const secondsSpent = Math.floor(timeSpent / 1000)
         // 只统计非扩展页面的时间
         if (currentTab.domain !== "extension") {
           initDomain(currentTab.domain)
-          timeData[currentTab.domain].totalTime += Math.floor(timeSpent / 1000)
+          timeData[currentTab.domain].totalTime += secondsSpent
+          
+          // 更新每日使用时间
+          const today = new Date().toISOString().split('T')[0] // 格式：YYYY-MM-DD
+          if (!dailyUsage[today]) {
+            dailyUsage[today] = 0
+          }
+          dailyUsage[today] += secondsSpent
         }
 
         // 只跟踪非扩展页面
@@ -206,10 +238,20 @@ if (chrome?.tabs) {
 
     if (currentTab?.tabId === tabId && currentTab) {
       const timeSpent = Date.now() - currentTab.activatedTime
+      const secondsSpent = Math.floor(timeSpent / 1000)
+      
       // 只统计非扩展页面的时间
       if (currentTab.domain !== "extension") {
         initDomain(currentTab.domain)
-        timeData[currentTab.domain].totalTime += Math.floor(timeSpent / 1000)
+        timeData[currentTab.domain].totalTime += secondsSpent
+        
+        // 更新每日使用时间
+        const today = new Date().toISOString().split('T')[0] // 格式：YYYY-MM-DD
+        if (!dailyUsage[today]) {
+          dailyUsage[today] = 0
+        }
+        dailyUsage[today] += secondsSpent
+        
         saveData()
       }
       currentTab = null
@@ -220,26 +262,28 @@ if (chrome?.tabs) {
 // 处理消息（Popup可以请求数据）
 if (chrome?.runtime) {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    if (request.action === "getTimeData") {
-      if (chrome?.storage?.local) {
-        chrome.storage.local.get(["webtimeData", "categories", "domainCategories"], (result) => {
-          sendResponse({
-            timeData: result?.webtimeData || {},
-            categories: result?.categories || categories,
-            domainCategories: result?.domainCategories || domainCategories
-          })
+          if (request.action === "getTimeData") {
+            if (chrome?.storage?.local) {
+              chrome.storage.local.get(["webtimeData", "categories", "domainCategories", "dailyUsage"], (result) => {
+                sendResponse({
+                  timeData: result?.webtimeData || {},
+                  categories: result?.categories || categories,
+                  domainCategories: result?.domainCategories || domainCategories,
+                  dailyUsage: result?.dailyUsage || {}
+                })
+              })
+            } else {
+              // 使用内存存储的数据
+              sendResponse({
+                timeData: inMemoryStorage.webtimeData || {},
+                categories: inMemoryStorage.categories || categories,
+                domainCategories: inMemoryStorage.domainCategories || domainCategories,
+                dailyUsage: inMemoryStorage.dailyUsage || {}
+              })
+            }
+            return true
+          }
         })
-      } else {
-        // 使用内存存储的数据
-        sendResponse({
-          timeData: inMemoryStorage.webtimeData || {},
-          categories: inMemoryStorage.categories || categories,
-          domainCategories: inMemoryStorage.domainCategories || domainCategories
-        })
-      }
-      return true
-    }
-  })
 }
 
 // 初始化
